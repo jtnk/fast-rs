@@ -57,13 +57,16 @@ pub struct Location {
 #[derive(Debug, Clone, Deserialize)]
 pub struct Client {
     pub ip: String,
+    #[allow(dead_code)]
     pub asn: String,
     pub isp: String,
+    #[allow(dead_code)]
     pub location: Location,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Target {
+    #[allow(dead_code)]
     pub name: String,
     pub url: String,
     pub location: Location,

@@ -48,8 +48,10 @@ pub fn render_summary(report: &Report) {
 }
 
 /// In-place updating progress line on stderr.
+#[allow(dead_code)]
 pub struct LiveRenderer;
 
+#[allow(dead_code)]
 impl LiveRenderer {
     pub fn update(&mut self, label: &str, mbps: f64) {
         let mut err = std::io::stderr().lock();
