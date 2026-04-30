@@ -8,7 +8,7 @@ Pure-Rust speed test against Netflix's fast.com.
 
 ## Usage
 
-    fastrs                   # human-friendly, live updates
+    fastrs                   # human-friendly multi-line summary
     fastrs --single-line     # one-line summary
     fastrs --no-upload       # skip the upload phase
     fastrs --json            # machine-readable output

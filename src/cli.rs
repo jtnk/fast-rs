@@ -12,7 +12,7 @@ pub struct Args {
     #[arg(long = "no-upload")]
     pub no_upload: bool,
 
-    /// Print one human-readable line, no live updates.
+    /// Print one human-readable line instead of the multi-line summary.
     #[arg(long = "single-line")]
     pub single_line: bool,
 }
