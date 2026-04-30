@@ -3,6 +3,10 @@ name = "fastrs"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+name = "fastrs"
+path = "src/lib.rs"
+
 [[bin]]
 name = "fastrs"
 path = "src/main.rs"

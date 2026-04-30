@@ -1,10 +1,6 @@
-mod api;
-mod cli;
-mod measure;
-mod output;
-
 use anyhow::Result;
 use clap::Parser;
+use fastrs::{api, cli, measure, output};
 
 #[tokio::main]
 async fn main() -> Result<()> {
