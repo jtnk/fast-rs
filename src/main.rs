@@ -16,6 +16,20 @@ async fn main() -> Result<()> {
     let token = api::fetch_token_default(&client).await?;
     let targets = api::fetch_targets_default(&client, &token, 5).await?;
 
+    #[cfg(feature = "tui")]
+    if args.tui {
+        let report = fastrs::tui::run(
+            &client,
+            &targets,
+            &measure::Options {
+                no_upload: args.no_upload,
+            },
+        )
+        .await?;
+        output::render_summary(&report);
+        return Ok(());
+    }
+
     let report = measure::run(
         &client,
         &targets,
