@@ -50,6 +50,16 @@ The gap between unloaded and loaded latency is *bufferbloat* — how much the co
       "client_isp": "TestNet"
     }
 
+### Interactive TUI
+
+    fastrs --tui
+
+A live throughput chart, latency sparkline, and stats panel. Press `q` or `Esc` to quit.
+
+To compile a slim binary without the TUI:
+
+    cargo install --no-default-features --path .
+
 ## How it works
 
 1. Scrape the API token from fast.com's JS bundle.
