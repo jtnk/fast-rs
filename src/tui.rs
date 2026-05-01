@@ -112,6 +112,158 @@ fn min_f64(xs: &[f64]) -> f64 {
     xs.iter().cloned().fold(f64::INFINITY, f64::min)
 }
 
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::symbols;
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Axis, Block, Borders, Chart, Dataset, Paragraph, Sparkline};
+use ratatui::Frame;
+
+impl App {
+    pub fn title(&self) -> String {
+        match (self.current_phase, &self.final_report) {
+            (_, Some(_)) => "fastrs — done — press q to quit".into(),
+            (Some(Phase::UnloadedLatency), _) => "fastrs — Phase: Unloaded latency".into(),
+            (Some(Phase::Download), _) => "fastrs — Phase: Download".into(),
+            (Some(Phase::LoadedLatency), _) => "fastrs — Phase: Loaded latency".into(),
+            (Some(Phase::Upload), _) => "fastrs — Phase: Upload".into(),
+            (None, None) => "fastrs — connecting...".into(),
+        }
+    }
+
+    pub fn render(&self, f: &mut Frame) {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Min(8),    // chart
+                Constraint::Length(5), // latency
+                Constraint::Length(7), // stats + footer
+            ])
+            .split(f.area());
+
+        self.render_chart(f, chunks[0]);
+        self.render_latency(f, chunks[1]);
+        self.render_stats(f, chunks[2]);
+    }
+
+    fn render_chart(&self, f: &mut Frame, area: Rect) {
+        let dl: Vec<(f64, f64)> = self.download_samples.clone();
+        let ul: Vec<(f64, f64)> = self.upload_samples.clone();
+
+        let max_t = dl
+            .iter()
+            .chain(ul.iter())
+            .map(|(t, _)| *t)
+            .fold(0.0_f64, f64::max)
+            .max(5.0);
+        let max_mbps = dl
+            .iter()
+            .chain(ul.iter())
+            .map(|(_, m)| *m)
+            .fold(0.0_f64, f64::max)
+            .max(1.0)
+            * 1.1;
+
+        let datasets = vec![
+            Dataset::default()
+                .name("download")
+                .marker(symbols::Marker::Braille)
+                .style(Style::default().fg(Color::Cyan))
+                .data(&dl),
+            Dataset::default()
+                .name("upload")
+                .marker(symbols::Marker::Braille)
+                .style(Style::default().fg(Color::Magenta))
+                .data(&ul),
+        ];
+
+        let chart = Chart::new(datasets)
+            .block(Block::default().borders(Borders::ALL).title(self.title()))
+            .x_axis(
+                Axis::default()
+                    .title("seconds")
+                    .style(Style::default().fg(Color::Gray))
+                    .bounds([0.0, max_t])
+                    .labels(vec![
+                        Span::raw("0"),
+                        Span::raw(format!("{}", (max_t / 2.0) as u32)),
+                        Span::raw(format!("{}", max_t as u32)),
+                    ]),
+            )
+            .y_axis(
+                Axis::default()
+                    .title("Mbps")
+                    .style(Style::default().fg(Color::Gray))
+                    .bounds([0.0, max_mbps])
+                    .labels(vec![
+                        Span::raw("0"),
+                        Span::raw(format!("{:.0}", max_mbps / 2.0)),
+                        Span::raw(format!("{:.0}", max_mbps)),
+                    ]),
+            );
+        f.render_widget(chart, area);
+    }
+
+    fn render_latency(&self, f: &mut Frame, area: Rect) {
+        let data: Vec<u64> = self.latency_samples.iter().map(|x| *x as u64).collect();
+        let label = format!(
+            "Latency  unloaded {}  loaded {}",
+            self.unloaded_latency_ms
+                .map(|x| format!("{x:.0} ms"))
+                .unwrap_or_else(|| "—".into()),
+            self.loaded_latency_ms
+                .map(|x| format!("{x:.0} ms"))
+                .unwrap_or_else(|| "—".into()),
+        );
+        let sparkline = Sparkline::default()
+            .block(Block::default().borders(Borders::ALL).title(label))
+            .data(&data)
+            .style(Style::default().fg(Color::Yellow));
+        f.render_widget(sparkline, area);
+    }
+
+    fn render_stats(&self, f: &mut Frame, area: Rect) {
+        let server = self
+            .final_report
+            .as_ref()
+            .and_then(|r| r.server_locations.first().cloned())
+            .unwrap_or_else(|| "—".into());
+        let client = self
+            .final_report
+            .as_ref()
+            .map(|r| format!("{} / {}", r.client_ip, r.client_isp))
+            .unwrap_or_else(|| "—".into());
+
+        let text = vec![
+            Line::from(vec![
+                Span::styled("↓ ", Style::default().fg(Color::Cyan)),
+                Span::raw(format!("{:>7.1} Mbps  ", self.current_dl_mbps)),
+                Span::styled("↑ ", Style::default().fg(Color::Magenta)),
+                Span::raw(format!("{:>7.1} Mbps  ", self.current_ul_mbps)),
+                Span::raw(format!("Server: {server}")),
+            ]),
+            Line::from(vec![
+                Span::raw(format!("Peak ↓ {:>7.1}  ", self.peak_dl_mbps)),
+                Span::raw(format!("Peak ↑ {:>7.1}  ", self.peak_ul_mbps)),
+                Span::raw(format!("Client: {client}")),
+            ]),
+            Line::from(""),
+            Line::from(Span::styled(
+                if self.final_report.is_some() {
+                    "press q to quit"
+                } else {
+                    "press q to abort"
+                },
+                Style::default().add_modifier(Modifier::DIM),
+            )),
+        ];
+
+        let para =
+            Paragraph::new(text).block(Block::default().borders(Borders::ALL).title("Stats"));
+        f.render_widget(para, area);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
