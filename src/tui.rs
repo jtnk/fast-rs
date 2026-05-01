@@ -264,6 +264,115 @@ impl App {
     }
 }
 
+use crate::api::Targets;
+use crate::measure::{self, Options};
+use anyhow::Result;
+use crossterm::event::{Event, KeyCode, KeyEventKind};
+use crossterm::execute;
+use crossterm::terminal::{
+    disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
+};
+use ratatui::backend::CrosstermBackend;
+use ratatui::Terminal;
+use std::io;
+use std::time::Duration;
+use tokio::sync::mpsc;
+
+const TICK: Duration = Duration::from_millis(100);
+
+/// Run the measurement under a TUI. Returns the same Report as `measure::run`.
+pub async fn run(client: &reqwest::Client, targets: &Targets, opts: &Options) -> Result<Report> {
+    enable_raw_mode()?;
+    let mut stdout = io::stdout();
+    execute!(stdout, EnterAlternateScreen)?;
+    let backend = CrosstermBackend::new(stdout);
+    let mut terminal = Terminal::new(backend)?;
+
+    let result = run_inner(&mut terminal, client, targets, opts).await;
+
+    disable_raw_mode()?;
+    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+    terminal.show_cursor()?;
+
+    result
+}
+
+async fn run_inner<B: ratatui::backend::Backend>(
+    terminal: &mut Terminal<B>,
+    client: &reqwest::Client,
+    targets: &Targets,
+    opts: &Options,
+) -> Result<Report>
+where
+    B::Error: Send + Sync + 'static,
+{
+    let (tx, mut rx) = mpsc::channel::<Progress>(64);
+    let mut app = App::new();
+
+    let measurement = {
+        let client = client.clone();
+        let targets = targets.clone();
+        let opts = Options {
+            no_upload: opts.no_upload,
+        };
+        let tx = tx.clone();
+        tokio::spawn(
+            async move { measure::run_with_progress(&client, &targets, &opts, Some(tx)).await },
+        )
+    };
+    drop(tx);
+
+    let mut tick = tokio::time::interval(TICK);
+    let mut measurement = Some(measurement);
+    let mut report: Option<Report> = None;
+
+    loop {
+        terminal.draw(|f| app.render(f))?;
+
+        tokio::select! {
+            _ = tick.tick() => {
+                // Drain any pending events without blocking.
+                while crossterm::event::poll(Duration::from_millis(0))? {
+                    if let Event::Key(k) = crossterm::event::read()? {
+                        if k.kind == KeyEventKind::Press
+                            && (k.code == KeyCode::Char('q') || k.code == KeyCode::Esc)
+                        {
+                            app.quit_requested = true;
+                        }
+                    }
+                }
+            }
+            sample = rx.recv() => {
+                match sample {
+                    Some(p) => app.apply(p),
+                    None => {
+                        // Channel closed; measurement task should be done.
+                        if let Some(handle) = measurement.take() {
+                            let r = handle.await??;
+                            app.measurement_done(r.clone());
+                            report = Some(r);
+                        }
+                    }
+                }
+            }
+        }
+
+        if app.quit_requested {
+            // If user quit before measurement finished, we still need to await it,
+            // but we shouldn't draw anymore. Just return whatever we got, or error
+            // out via the running task.
+            break;
+        }
+    }
+
+    if let Some(handle) = measurement {
+        // User quit early. Wait for the measurement to wind down.
+        report = Some(handle.await??);
+    }
+
+    Ok(report.expect("measurement must have produced a Report"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
