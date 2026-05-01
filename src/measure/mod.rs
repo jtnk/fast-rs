@@ -9,6 +9,24 @@ use serde::Serialize;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
+/// Phases the orchestrator runs through, in order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Phase {
+    UnloadedLatency,
+    Download,
+    LoadedLatency,
+    Upload,
+}
+
+/// Progress events emitted during measurement.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Progress {
+    PhaseStart(Phase),
+    Throughput { mbps: f64 },
+    Latency { ms: f64 },
+    PhaseEnd(Phase),
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct Report {
     pub download_mbps: f64,
