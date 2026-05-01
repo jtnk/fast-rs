@@ -14,7 +14,7 @@ No headless browser, no Python, no Node — a single static binary that talks to
 
 Grab the latest release for your platform from the [Releases](../../releases) page. Each archive contains the `fastrs` binary plus this README and the LICENSE.
 
-    curl -L https://github.com/USER/fastrs/releases/latest/download/fastrs-x86_64-unknown-linux-gnu.tar.gz | tar -xz
+    curl -L https://github.com/jtnk/fast-rs/releases/latest/download/fastrs-x86_64-unknown-linux-gnu.tar.gz | tar -xz
     ./fastrs
 
 ## Usage
