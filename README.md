@@ -66,18 +66,34 @@ To compile a slim binary without the TUI:
 5. Re-probe latency mid-download to compute loaded latency / bufferbloat.
 6. Repeat with concurrent POSTs for the upload phase.
 
-## Building
-
-    cargo build --release
-
-The release binary lands at `target/release/fastrs`.
-
 ## Development
 
-    cargo test                                 # unit tests
+### Build
+
+    cargo build --release                      # release binary at target/release/fastrs
+    cargo build --no-default-features          # slim build, no TUI
+
+### Test, lint, format
+
+    cargo test --lib                           # unit tests (fast)
     cargo test -- --ignored                    # also run the live integration test against fast.com
     cargo clippy --all-targets -- -D warnings  # lint
     cargo fmt                                  # format
+
+CI runs `cargo test --lib`, `cargo fmt --check`, and `cargo clippy --all-targets -- -D warnings` on Linux/macOS/Windows. Tagged pushes (`v*`) build cross-platform release archives via `.github/workflows/release.yml`.
+
+### Layout
+
+- `src/api.rs` — fast.com token discovery + targets API
+- `src/measure/` — orchestrator and per-phase code (latency / download / upload)
+- `src/output.rs` — JSON, single-line, and multi-line summary renderers
+- `src/tui.rs` — live TUI (gated on the `tui` feature, default on)
+- `tests/end_to_end.rs` — `#[ignore]`'d live integration test
+- `docs/plans/` — design and implementation plans for past features
+
+### Cargo features
+
+- `tui` *(default)* — pulls in `ratatui` + `crossterm`, enables `--tui`. Disable with `--no-default-features` for a smaller binary.
 
 ## License
 
