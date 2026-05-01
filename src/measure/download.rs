@@ -20,6 +20,7 @@ pub async fn measure(
     client: &reqwest::Client,
     urls: &[String],
     shutdown_signal: Arc<std::sync::atomic::AtomicBool>,
+    progress: Option<&tokio::sync::mpsc::Sender<crate::measure::Progress>>,
 ) -> Result<f64> {
     let total_bytes = Arc::new(AtomicU64::new(0));
 
@@ -51,6 +52,10 @@ pub async fn measure(
 
         let mbps = bytes_to_mbps(delta_bytes, delta_t);
         samples.push(mbps);
+
+        if let Some(tx) = progress {
+            let _ = tx.send(crate::measure::Progress::Throughput { mbps }).await;
+        }
 
         if is_stable(&samples, STABILITY_WINDOW, STABILITY_TOLERANCE)
             || start.elapsed() >= MAX_DURATION
