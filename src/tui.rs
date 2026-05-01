@@ -11,7 +11,8 @@ pub struct App {
     pub phase_started: Option<Instant>,
     pub download_samples: Vec<(f64, f64)>, // (elapsed_secs, mbps)
     pub upload_samples: Vec<(f64, f64)>,
-    pub latency_samples: Vec<f64>, // ms, bounded to SPARKLINE_LEN
+    pub unloaded_latency_samples: Vec<f64>, // ms, bounded to SPARKLINE_LEN
+    pub loaded_latency_samples: Vec<f64>,   // ms, bounded to SPARKLINE_LEN
     pub current_dl_mbps: f64,
     pub current_ul_mbps: f64,
     pub peak_dl_mbps: f64,
@@ -30,7 +31,8 @@ impl App {
             phase_started: None,
             download_samples: Vec::new(),
             upload_samples: Vec::new(),
-            latency_samples: Vec::new(),
+            unloaded_latency_samples: Vec::new(),
+            loaded_latency_samples: Vec::new(),
             current_dl_mbps: 0.0,
             current_ul_mbps: 0.0,
             peak_dl_mbps: 0.0,
@@ -49,17 +51,14 @@ impl App {
             Progress::PhaseStart(phase) => {
                 self.current_phase = Some(phase);
                 self.phase_started = Some(Instant::now());
-                if matches!(phase, Phase::UnloadedLatency | Phase::LoadedLatency) {
-                    self.latency_samples.clear();
-                }
             }
             Progress::PhaseEnd(phase) => {
                 match phase {
-                    Phase::UnloadedLatency if !self.latency_samples.is_empty() => {
-                        self.unloaded_latency_ms = Some(min_f64(&self.latency_samples));
+                    Phase::UnloadedLatency if !self.unloaded_latency_samples.is_empty() => {
+                        self.unloaded_latency_ms = Some(min_f64(&self.unloaded_latency_samples));
                     }
-                    Phase::LoadedLatency if !self.latency_samples.is_empty() => {
-                        self.loaded_latency_ms = Some(min_f64(&self.latency_samples));
+                    Phase::LoadedLatency if !self.loaded_latency_samples.is_empty() => {
+                        self.loaded_latency_ms = Some(min_f64(&self.loaded_latency_samples));
                     }
                     _ => {}
                 }
@@ -85,10 +84,17 @@ impl App {
                 _ => {}
             },
             Progress::Latency { ms } => {
-                self.latency_samples.push(ms);
-                if self.latency_samples.len() > SPARKLINE_LEN {
-                    let drop = self.latency_samples.len() - SPARKLINE_LEN;
-                    self.latency_samples.drain(0..drop);
+                let buf = match self.current_phase {
+                    Some(Phase::UnloadedLatency) => Some(&mut self.unloaded_latency_samples),
+                    Some(Phase::LoadedLatency) => Some(&mut self.loaded_latency_samples),
+                    _ => None,
+                };
+                if let Some(buf) = buf {
+                    buf.push(ms);
+                    if buf.len() > SPARKLINE_LEN {
+                        let drop = buf.len() - SPARKLINE_LEN;
+                        buf.drain(0..drop);
+                    }
                 }
             }
         }
@@ -116,7 +122,7 @@ use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::symbols;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Axis, Block, Borders, Chart, Dataset, Paragraph, Sparkline};
+use ratatui::widgets::{Axis, Block, Borders, Chart, Dataset, GraphType, Paragraph, Sparkline};
 use ratatui::Frame;
 
 impl App {
@@ -135,9 +141,9 @@ impl App {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Min(8),    // chart
-                Constraint::Length(5), // latency
-                Constraint::Length(7), // stats + footer
+                Constraint::Min(8),    // chart (gets all leftover space)
+                Constraint::Length(4), // latency row (two sparklines side-by-side)
+                Constraint::Length(6), // stats + footer
             ])
             .split(f.area());
 
@@ -168,11 +174,13 @@ impl App {
             Dataset::default()
                 .name("download")
                 .marker(symbols::Marker::Braille)
+                .graph_type(GraphType::Line)
                 .style(Style::default().fg(Color::Cyan))
                 .data(&dl),
             Dataset::default()
                 .name("upload")
                 .marker(symbols::Marker::Braille)
+                .graph_type(GraphType::Line)
                 .style(Style::default().fg(Color::Magenta))
                 .data(&ul),
         ];
@@ -205,21 +213,46 @@ impl App {
     }
 
     fn render_latency(&self, f: &mut Frame, area: Rect) {
-        let data: Vec<u64> = self.latency_samples.iter().map(|x| *x as u64).collect();
-        let label = format!(
-            "Latency  unloaded {}  loaded {}",
+        let cols = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+            .split(area);
+
+        let unloaded_data: Vec<u64> = self
+            .unloaded_latency_samples
+            .iter()
+            .map(|x| *x as u64)
+            .collect();
+        let loaded_data: Vec<u64> = self
+            .loaded_latency_samples
+            .iter()
+            .map(|x| *x as u64)
+            .collect();
+
+        let unloaded_label = format!(
+            "Unloaded latency  {}",
             self.unloaded_latency_ms
                 .map(|x| format!("{x:.0} ms"))
                 .unwrap_or_else(|| "—".into()),
+        );
+        let loaded_label = format!(
+            "Loaded latency  {}",
             self.loaded_latency_ms
                 .map(|x| format!("{x:.0} ms"))
                 .unwrap_or_else(|| "—".into()),
         );
-        let sparkline = Sparkline::default()
-            .block(Block::default().borders(Borders::ALL).title(label))
-            .data(&data)
+
+        let unloaded = Sparkline::default()
+            .block(Block::default().borders(Borders::ALL).title(unloaded_label))
+            .data(&unloaded_data)
             .style(Style::default().fg(Color::Yellow));
-        f.render_widget(sparkline, area);
+        let loaded = Sparkline::default()
+            .block(Block::default().borders(Borders::ALL).title(loaded_label))
+            .data(&loaded_data)
+            .style(Style::default().fg(Color::Red));
+
+        f.render_widget(unloaded, cols[0]);
+        f.render_widget(loaded, cols[1]);
     }
 
     fn render_stats(&self, f: &mut Frame, area: Rect) {
@@ -420,31 +453,44 @@ mod tests {
     }
 
     #[test]
-    fn loaded_latency_clears_unloaded_buffer_then_records_its_own_min() {
+    fn loaded_and_unloaded_buffers_are_independent() {
         let mut app = App::new();
         app.apply(Progress::PhaseStart(Phase::UnloadedLatency));
         app.apply(Progress::Latency { ms: 10.0 });
         app.apply(Progress::PhaseEnd(Phase::UnloadedLatency));
         app.apply(Progress::PhaseStart(Phase::LoadedLatency));
-        assert!(app.latency_samples.is_empty());
+        // Unloaded samples are preserved across the loaded phase so the UI
+        // can render both sparklines simultaneously.
+        assert_eq!(app.unloaded_latency_samples, vec![10.0]);
+        assert!(app.loaded_latency_samples.is_empty());
         app.apply(Progress::Latency { ms: 35.0 });
         app.apply(Progress::Latency { ms: 38.0 });
         app.apply(Progress::PhaseEnd(Phase::LoadedLatency));
         assert_eq!(app.unloaded_latency_ms, Some(10.0));
         assert_eq!(app.loaded_latency_ms, Some(35.0));
+        assert_eq!(app.unloaded_latency_samples, vec![10.0]);
+        assert_eq!(app.loaded_latency_samples, vec![35.0, 38.0]);
+    }
+
+    #[test]
+    fn latency_outside_latency_phase_is_ignored() {
+        let mut app = App::new();
+        app.apply(Progress::PhaseStart(Phase::Download));
+        app.apply(Progress::Latency { ms: 99.0 });
+        assert!(app.unloaded_latency_samples.is_empty());
+        assert!(app.loaded_latency_samples.is_empty());
     }
 
     #[test]
     fn latency_buffer_is_bounded() {
         let mut app = App::new();
-        app.apply(Progress::PhaseStart(Phase::Download));
+        app.apply(Progress::PhaseStart(Phase::UnloadedLatency));
         for i in 0..(SPARKLINE_LEN + 10) {
             app.apply(Progress::Latency { ms: i as f64 });
         }
-        assert_eq!(app.latency_samples.len(), SPARKLINE_LEN);
-        // Most-recent value should be the last we pushed.
+        assert_eq!(app.unloaded_latency_samples.len(), SPARKLINE_LEN);
         assert_eq!(
-            *app.latency_samples.last().unwrap(),
+            *app.unloaded_latency_samples.last().unwrap(),
             (SPARKLINE_LEN + 10 - 1) as f64
         );
     }
