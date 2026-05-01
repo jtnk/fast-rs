@@ -6,7 +6,7 @@ use fastrs::{api, cli, measure, output};
 async fn main() -> Result<()> {
     let args = cli::Args::parse();
     let client = reqwest::Client::builder()
-        .user_agent("fastrs/0.1")
+        .user_agent("fastrs/0.2")
         .build()?;
 
     if !args.json && !args.single_line {
