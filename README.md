@@ -66,19 +66,25 @@ To compile a slim binary without the TUI:
 5. Re-probe latency mid-download to compute loaded latency / bufferbloat.
 6. Repeat with concurrent POSTs for the upload phase.
 
+## Building
+
+    minimal run build
+
+The release binary lands at `target/release/fastrs`. Or run directly:
+
+    minimal run run
+
 ## Development
 
-### Build
+`minimal.toml` defines tasks that run inside the [Minimal](https://minimal.dev) sandbox with the toolchain pinned:
 
-    cargo build --release                      # release binary at target/release/fastrs
-    cargo build --no-default-features          # slim build, no TUI
+    minimal run dev          # interactive tmux session (Claude + shell)
+    minimal run test         # unit tests
+    minimal run test-live    # also run the live integration test against fast.com
+    minimal run lint         # cargo clippy --all-targets -- -D warnings
+    minimal run fmt          # cargo fmt
 
-### Test, lint, format
-
-    cargo test --lib                           # unit tests (fast)
-    cargo test -- --ignored                    # also run the live integration test against fast.com
-    cargo clippy --all-targets -- -D warnings  # lint
-    cargo fmt                                  # format
+Without Minimal, the equivalent cargo commands (`cargo build --release`, `cargo test`, `cargo clippy --all-targets -- -D warnings`, `cargo fmt`) work too.
 
 CI runs `cargo test --lib`, `cargo fmt --check`, and `cargo clippy --all-targets -- -D warnings` on Linux/macOS/Windows. Tagged pushes (`v*`) build cross-platform release archives via `.github/workflows/release.yml`.
 

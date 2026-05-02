@@ -20,3 +20,35 @@ exec = "bash --noprofile -l"
 [tasks.claude]
 packages = ["base", "claude-code"]
 exec = "claude --dangerously-skip-permissions"
+
+[tasks.dev]
+interactive = true
+packages = ["claude-code", "base", "vim", "tmux", "ncurses", "fd", "fzf", "ripgrep", "git", "jq", "rust"]
+patches.dir."~/.claude" = "read-write"
+patches.file."~/.gitconfig" = "read-only"
+patches.file."~/.vimrc" = "read-write"
+bash = "scripts/setup-dev.sh"
+
+[tasks.build]
+packages = ["base", "rust", "gcc", "binutils"]
+exec = "env RUSTFLAGS=-Clinker=gcc CC=gcc cargo build --release"
+
+[tasks.test]
+packages = ["base", "rust", "gcc", "binutils"]
+exec = "env RUSTFLAGS=-Clinker=gcc CC=gcc cargo test"
+
+[tasks.test-live]
+packages = ["base", "rust", "gcc", "binutils"]
+exec = "env RUSTFLAGS=-Clinker=gcc CC=gcc cargo test -- --ignored"
+
+[tasks.lint]
+packages = ["base", "rust", "gcc", "binutils"]
+exec = "env RUSTFLAGS=-Clinker=gcc CC=gcc cargo clippy --all-targets -- -D warnings"
+
+[tasks.fmt]
+packages = ["base", "rust"]
+exec = "cargo fmt"
+
+[tasks.run]
+packages = ["base", "rust", "gcc", "binutils"]
+exec = "env RUSTFLAGS=-Clinker=gcc CC=gcc cargo run --release"
