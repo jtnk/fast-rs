@@ -68,6 +68,8 @@ To compile a slim binary without the TUI:
 
 ## Building
 
+From the host:
+
     minimal run build
 
 The release binary lands at `target/release/fastrs`. Or run directly:
@@ -76,15 +78,39 @@ The release binary lands at `target/release/fastrs`. Or run directly:
 
 ## Development
 
-`minimal.toml` defines tasks that run inside the [Minimal](https://minimal.dev) sandbox with the toolchain pinned:
+This project is set up to build and run inside the [Minimal](https://minimal.dev) sandbox — the toolchain (`rust`, `gcc`, `binutils`, …) is pinned in `minimal.toml`, so no host install is required beyond the `minimal` CLI.
 
-    minimal run dev          # interactive tmux session (Claude + shell)
+> **CLI naming:** on the host the binary is `minimal`. Once you're inside a sandbox (e.g. via `minimal run dev`) the same tool is exposed as `min`. The examples below use whichever name matches the context.
+
+Tasks are defined in `minimal.toml`. From the host:
+
+    minimal run dev          # interactive zellij dev session (Claude pane + shell pane)
+    minimal run build        # cargo build --release
+    minimal run run          # cargo run --release
+    minimal run fast-rs-debug # cargo run --release with RUST_LOG=debug
     minimal run test         # unit tests
     minimal run test-live    # also run the live integration test against fast.com
     minimal run lint         # cargo clippy --all-targets -- -D warnings
     minimal run fmt          # cargo fmt
 
-Without Minimal, the equivalent cargo commands (`cargo build --release`, `cargo test`, `cargo clippy --all-targets -- -D warnings`, `cargo fmt`) work too.
+From inside the sandbox shell, drop the `imal`:
+
+    min run test
+    min run lint
+    # etc.
+
+### `minimal run dev`
+
+Launches a [zellij](https://zellij.dev) layout (`zellij.kdl`) via `scripts/setup-dev.sh` with two panes:
+
+- **left** — Claude Code (`claude --dangerously-skip-permissions`, only safe because the sandbox is ephemeral).
+- **right** — a bash shell that first runs `scripts/dev-shell.sh` (a quick cheat sheet of available `min run <task>` shortcuts) and then drops you into an interactive prompt.
+
+The session is named `dev` and is reset on each invocation.
+
+### Without Minimal
+
+The equivalent cargo commands (`cargo build --release`, `cargo test`, `cargo clippy --all-targets -- -D warnings`, `cargo fmt`) work too.
 
 CI runs `cargo test --lib`, `cargo fmt --check`, and `cargo clippy --all-targets -- -D warnings` on Linux/macOS/Windows. Tagged pushes (`v*`) build cross-platform release archives via `.github/workflows/release.yml`.
 

@@ -1,0 +1,13 @@
+layout {
+    pane split_direction="vertical" {
+        pane focus=true name="claude" command="claude" {
+            args "--dangerously-skip-permissions"
+        }
+        pane split_direction="horizontal" {
+            pane size="35%" name="fastrs" command="scripts/dev-shell.sh"
+            pane name="shell" command="bash" {
+                args "--noprofile" "-l"
+            }
+        }
+    }
+}

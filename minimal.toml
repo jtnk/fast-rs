@@ -20,11 +20,14 @@ exec = "bash --noprofile -l"
 [tasks.claude]
 packages = ["base", "claude-code"]
 exec = "claude --dangerously-skip-permissions"
+patches.dir."~/.claude" = "read-write"
+patches.file."~/.claude.json" = "read-write"
 
 [tasks.dev]
 interactive = true
-packages = ["claude-code", "base", "vim", "tmux", "ncurses", "fd", "fzf", "ripgrep", "git", "jq", "rust"]
+packages = ["claude-code", "base", "vim", "zellij", "fd", "fzf", "ripgrep", "git", "jq", "rust"]
 patches.dir."~/.claude" = "read-write"
+patches.file."~/.claude.json" = "read-write"
 patches.file."~/.gitconfig" = "read-only"
 patches.file."~/.vimrc" = "read-write"
 bash = "scripts/setup-dev.sh"
@@ -52,3 +55,7 @@ exec = "cargo fmt"
 [tasks.run]
 packages = ["base", "rust", "gcc", "binutils"]
 exec = "env RUSTFLAGS=-Clinker=gcc CC=gcc cargo run --release"
+
+[tasks.fast-rs-debug]
+packages = ["base", "rust", "gcc", "binutils"]
+exec = "env RUSTFLAGS=-Clinker=gcc CC=gcc RUST_LOG=debug cargo run --release"
