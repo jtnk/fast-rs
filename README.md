@@ -93,11 +93,17 @@ Tasks are defined in `minimal.toml`. From the host:
     minimal run lint         # cargo clippy --all-targets -- -D warnings
     minimal run fmt          # cargo fmt
 
-From inside the sandbox shell, drop the `imal`:
+From inside the sandbox shell :
 
-    min run test
-    min run lint
-    # etc.
+    min run dev          # interactive zellij dev session (Claude pane + shell pane)
+    min run build        # cargo build --release
+    min run run          # cargo run --release
+    min run fast-rs-debug # cargo run --release with RUST_LOG=debug
+    min run test         # unit tests
+    min run test-live    # also run the live integration test against fast.com
+    min run lint         # cargo clippy --all-targets -- -D warnings
+    min run fmt          # cargo fmt
+    
 
 ### `minimal run dev`
 
