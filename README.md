@@ -95,7 +95,6 @@ Tasks are defined in `minimal.toml`. From the host:
 
 From inside the sandbox shell :
 
-    min run dev          # interactive zellij dev session (Claude pane + shell pane)
     min run build        # cargo build --release
     min run run          # cargo run --release
     min run fast-rs-debug # cargo run --release with RUST_LOG=debug
