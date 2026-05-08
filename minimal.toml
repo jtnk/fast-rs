@@ -56,6 +56,10 @@ exec = "cargo fmt"
 packages = ["base", "rust", "gcc", "binutils"]
 exec = "env RUSTFLAGS=-Clinker=gcc CC=gcc cargo run --release"
 
+[tasks.webapp]
+packages = ["base", "python"]
+exec = "python3 webapp/server.py"
+
 [tasks.fast-rs-debug]
 packages = ["base", "rust", "gcc", "binutils"]
 exec = "env RUSTFLAGS=-Clinker=gcc CC=gcc RUST_LOG=debug cargo run --release"

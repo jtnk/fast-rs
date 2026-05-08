@@ -26,6 +26,7 @@ cat <<EOF
     ${B}min run test-live${R}        ${D}cargo test -- --ignored${R}  ${YL}(hits fast.com)${R}
     ${B}min run lint${R}             ${D}cargo clippy --all-targets -- -D warnings${R}
     ${B}min run fmt${R}              ${D}cargo fmt${R}
+    ${B}min run webapp${R}           ${D}python3 webapp/server.py${R}
 
   ${PK}▸ sandbox${R}
     ${B}min add${R}  ${GY}<pkg>${R}       ${D}install a package for this session${R}
