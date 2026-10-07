@@ -9,7 +9,8 @@
 #   1. Platform gate: Linux, x86_64/aarch64, kernel >= 5.10
 #   2. Installer: curl|sh from go.minimal.dev (hash-verified, atomic, idempotent)
 #   3. userns remediation: Ubuntu >=24.04 AppArmor profile via sudo when needed
-#   4. Liveness: `min ls` autospawns minimald and proves the client→daemon path
+#   4. git insteadOf neutralization for Minimal upstream prefixes (see below)
+#   5. Liveness: `min ls` autospawns minimald and proves the client→daemon path
 #
 # What it deliberately does NOT do: create sessions, touch the project, or
 # install packages — that stays with `minbox up` so the box lifecycle is owned
@@ -84,6 +85,35 @@ if [ -x "$BINDIR/min" ]; then
     say "min already installed: $(min --version 2>/dev/null | head -1)"
 fi
 
+# --- 3b. git insteadOf neutralization ---------------------------------------
+# Managed hosts (Devin Cloud VMs, some CI images) rewrite github.com URLs to an
+# authenticated proxy via url.<proxy>.insteadOf. `git remote get-url` applies
+# that rewrite on read, so minimald's upstream-cache identity check compares
+# the *proxy* URL against [upstream].repo and dies with
+# `vcs: invalid remote path`. Neutralize it only for the prefixes Minimal
+# caches: an identity insteadOf rule (base == match) wins longest-match, so
+# Minimal sees raw URLs while every other repo keeps proxying.
+neutralize_insteadof() {
+    command -v git >/dev/null 2>&1 || return 0
+    _urls="https://github.com/gominimal/"
+    if [ -f minimal.toml ]; then
+        _u=$(sed -n 's/^[[:space:]]*repo[[:space:]]*=[[:space:]]*"\(.*\)".*/\1/p' \
+            minimal.toml | head -1)
+        case "$_u" in
+            https://*/*/*|http://*/*/*) _urls="$_urls ${_u%/*}" ;;
+        esac
+    fi
+    for _u in $_urls; do
+        _p="${_u%/}/"
+        # ls-remote --get-url expands insteadOf rules: if the prefix survives
+        # unchanged there is no rewrite (or our identity rule is already in).
+        _eff=$(git ls-remote --get-url "$_p" 2>/dev/null || echo "$_p")
+        [ "$_eff" = "$_p" ] && continue
+        git config --global "url.$_p.insteadof" "$_p" \
+            && say "git insteadOf rewrite detected ($_p -> $_eff); identity exception added"
+    done
+}
+
 if [ "$CHECK_ONLY" = 1 ]; then
     [ "$need_install" = 0 ] || fail "min not installed"
     _rc=0; userns_ok || _rc=$?
@@ -91,6 +121,7 @@ if [ "$CHECK_ONLY" = 1 ]; then
         1) fail "unprivileged user namespaces disabled" ;;
         2) fail "Ubuntu AppArmor userns restriction active; Minimal AppArmor profile missing" ;;
     esac
+    neutralize_insteadof
     min ls >/dev/null 2>&1 || fail "min installed but daemon does not answer"
     say "check OK: $(min --version 2>/dev/null | head -1), daemon live"
     exit 0
@@ -114,6 +145,8 @@ case "$_rc" in
     1) fail "unprivileged user namespaces disabled (kernel.unprivileged_userns_clone=0 or max_user_namespaces=0) — needs a sysctl change with root" ;;
     2) remediate_apparmor ;;
 esac
+
+neutralize_insteadof
 
 say "probing daemon (autospawns minimald on first contact)"
 _i=0
