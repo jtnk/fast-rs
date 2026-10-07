@@ -32,3 +32,17 @@ Performs a text search across all available packages, printing packages that mat
 This command runs the specified task (declared in this project's `minimal.toml`) in a separate Minimal execution environment, streaming back the output.
 
 Some typical tasks include `build` and `test`.
+
+## devin-minimal kit (.devin/minimal/)
+
+This repo vendors the devin-minimal kit. A Minimal box may already be
+armed (`.devin/minimal-box.json`) — check with
+`sh .devin/minimal/minbox status`. To run shell commands inside the armed
+box at /workbench with auto file-sync, use:
+
+    sh .devin/minimal/minbox exec '<command>'
+
+Prefix `host:` inside the command to escape to the VM. If no box is armed,
+`sh .devin/minimal/minbox up` creates one. If `min` is missing, run
+`sh .devin/minimal/cloud-bootstrap.sh` first (Linux). Declared project
+tasks run via `sh .devin/minimal/minbox task <name>`.
