@@ -1,0 +1,38 @@
+{
+  "SessionStart": [
+    {
+      "matcher": "",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "sh -c 'ROOT=\"${DEVIN_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}\"; exec sh \"$ROOT/.devin/minimal/session-start.sh\"'",
+          "timeout": 15
+        }
+      ]
+    }
+  ],
+  "PreToolUse": [
+    {
+      "matcher": "^exec$",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "sh -c 'ROOT=\"${DEVIN_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}\"; exec sh \"$ROOT/.devin/minimal/route-exec.sh\"'",
+          "timeout": 15
+        }
+      ]
+    }
+  ],
+  "PermissionRequest": [
+    {
+      "matcher": "^exec$",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "sh -c 'ROOT=\"${DEVIN_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}\"; exec sh \"$ROOT/.devin/minimal/policy-approve.sh\"'",
+          "timeout": 10
+        }
+      ]
+    }
+  ]
+}

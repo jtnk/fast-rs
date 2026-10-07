@@ -1,0 +1,270 @@
+#!/bin/sh
+# minbox — glue between Devin's exec path and a Minimal box.
+#
+# POSIX sh, no jq/python dependency on either side of the wire (the box's
+# base image carries only tar/bash/coreutils). Subcommands:
+#
+#   minbox up [--name N] [--network MODE] [--loadout L]…   activate + arm
+#   minbox down [--destroy]                                disarm (+ destroy)
+#   minbox status                                          armed? live? ids
+#   minbox exec <cmd>                                      sync + run in box
+#   minbox sync                                            push changed files
+#   minbox pull [path…]                                    pull box → host
+#   minbox task <name> [-- args…]                          declared task, in box
+#   minbox policy                                          session policy JSON
+#
+# State: <project>/.devin/minimal-box.json — machine-local, kept out of git
+# via .git/info/exclude. Armed sessions never fall back to host execution:
+# a dead box blocks with a repair hint rather than silently running
+# unsandboxed (Devin's own --sandbox behaves the same way).
+set -u
+
+PROG=minbox
+
+die() { printf '%s: %s\n' "$PROG" "$*" >&2; exit 1; }
+say() { printf '%s\n' "$*"; }
+
+# Hint text differs by install shape: under a plugin the user-facing entry is
+# the /minimal:* skills; vendored into .devin/minimal/ it's this script.
+SELF_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
+case "$SELF_DIR" in
+    */.devin/minimal) HINT_UP="sh .devin/minimal/minbox up"; HINT_DOWN="sh .devin/minimal/minbox down" ;;
+    *)                HINT_UP="/minimal:box-up";            HINT_DOWN="/minimal:box-down" ;;
+esac
+
+# ---------- project root & state ----------
+
+root() {
+    if [ -n "${DEVIN_PROJECT_DIR:-}" ] && [ -d "$DEVIN_PROJECT_DIR" ]; then
+        cd "$DEVIN_PROJECT_DIR" && pwd -P && return
+    fi
+    git rev-parse --show-toplevel 2>/dev/null || pwd -P
+}
+
+state_file() { printf '%s/.devin/minimal-box.json' "$(root)"; }
+
+# sed-read a flat field out of our own tiny JSON state file; accepts both
+# quoted strings ("session": "x") and bare atoms ("armed": true). Two
+# passes, since BSD sed has no \? in BRE.
+state_get() {
+    [ -f "$(state_file)" ] || return 1
+    _v=$(sed -n "s/.*\"$1\"[ ]*:[ ]*\"\([^\"]*\)\".*/\1/p" "$(state_file)" | head -1)
+    [ -n "$_v" ] || _v=$(sed -n "s/.*\"$1\"[ ]*:[ ]*\([^,} ]*\).*/\1/p" "$(state_file)" | head -1)
+    [ -n "$_v" ] && printf '%s' "$_v"
+}
+
+state_write() {
+    _f="$(state_file)"
+    mkdir -p "$(dirname "$_f")"
+    # $1 session-name  $2 session-id  $3 boxdir
+    cat > "$_f" <<EOF
+{
+  "schema": "devin-minimal/v1",
+  "session": "$1",
+  "session_id": "$2",
+  "boxdir": "$3",
+  "armed": true
+}
+EOF
+    # keep the machine-local state file out of every git view without
+    # touching a committed .gitignore
+    if git -C "$(root)" rev-parse --git-dir >/dev/null 2>&1; then
+        _ex="$(git -C "$(root)" rev-parse --git-dir)/info/exclude"
+        grep -qxF 'minimal-box.json' "$_ex" 2>/dev/null || \
+            printf 'minimal-box.json\n' >> "$_ex"
+    fi
+}
+
+armed() {
+    [ "$(state_get armed 2>/dev/null)" = "true" ] && [ -n "$(state_get session_id 2>/dev/null)" ]
+}
+
+# ---------- min helpers ----------
+
+have_min() { command -v min >/dev/null 2>&1; }
+
+# Fail with the right install hint for the platform we're standing on.
+need_min() {
+    have_min && return 0
+    case "$(uname -s)" in
+        Linux) die "min not on PATH — bootstrap Minimal here first (scripts/cloud-bootstrap.sh, or https://go.minimal.dev/stable | sh)" ;;
+        *)     die "min not on PATH — install Minimal first (https://go.minimal.dev/stable | sh)" ;;
+    esac
+}
+
+# Is this session id live on the daemon? Sessions JSON carries "id" fields;
+# match on the UUID itself (names can be reused, ids cannot).
+session_live() {
+    have_min || return 1
+    min session list --json 2>/dev/null | grep -q "$1"
+}
+
+# ---------- sync (host → box, incremental) ----------
+
+# Print the push file list on stdout (NUL-separated on the wire via -z where
+# supported). Excludes .git (history moves by `git push min://`, not tar),
+# .devin box state, and anything gitignore-covered when in a repo.
+sync_push() {
+    _root="$(root)"; _id="$(state_get session_id)" || return 0
+    _marker="$_root/.devin/.minbox-sync-marker"
+    cd "$_root" || die "cannot cd $_root"
+
+    if git rev-parse --git-dir >/dev/null 2>&1; then
+        # modified + untracked-not-ignored → tar in; deleted → rm in box.
+        # Newline-delimited lists: filenames containing newlines are out of
+        # scope by policy (they break every list protocol short of -z).
+        # Union with files newer than the last-push marker: a file that was
+        # committed after activation shows in neither ls-files -m nor -o, but
+        # its mtime still postdates the marker — this is how work committed
+        # mid-session (or a `git pull` landing new files) reaches the box.
+        _changed="$({ git ls-files -mo --exclude-standard 2>/dev/null;
+            [ -f "$_marker" ] && find . -type f -newer "$_marker" \
+                ! -path './.git/*' ! -path './.devin/*' ! -path './node_modules/*' \
+                -print | sed 's|^\./||'; } | sort -u)"
+        _deleted="$(git ls-files -d 2>/dev/null)"
+    else
+        if [ -f "$_marker" ]; then
+            _changed="$(find . -type f -newer "$_marker" \
+                ! -path './.git/*' ! -path './.devin/*' ! -path './node_modules/*' \
+                -print | sed 's|^\./||')"
+        else
+            _changed=
+        fi
+        _deleted=
+    fi
+
+    if [ -n "$_changed" ]; then
+        printf '%s\n' "$_changed" > /tmp/minbox-files.$$
+        COPYFILE_DISABLE=1 tar cf - --no-xattrs -T /tmp/minbox-files.$$ 2>/dev/null \
+            | min session exec "$_id" 'tar xf - -C /workbench' \
+            || { rm -f /tmp/minbox-files.$$; die "sync push failed (box alive? minbox status)"; }
+        rm -f /tmp/minbox-files.$$
+    fi
+
+    if [ -n "$_deleted" ]; then
+        # single-quote each path for the remote rm
+        _rm=$(printf '%s\n' "$_deleted" | sed "s/'/'\\\\''/g; s/.*/'&'/" | tr '\n' ' ')
+        [ -n "$_rm" ] && min session exec "$_id" "cd /workbench && rm -f -- $_rm" \
+            || die "sync delete failed"
+    fi
+
+    mkdir -p "$_root/.devin" && touch "$_marker"
+}
+
+# ---------- commands ----------
+
+cmd_up() {
+    need_min
+    _root="$(root)"; _name=; _net=; _loadouts=
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --name)    _name="$2"; shift 2 ;;
+            --network) _net="$2"; shift 2 ;;
+            --loadout) _loadouts="$_loadouts --loadout $2"; shift 2 ;;
+            *)         die "unknown flag $1" ;;
+        esac
+    done
+    if [ -z "$_name" ]; then
+        _name="devin-$(basename "$_root" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9-' '-' \
+            | sed 's/--*/-/g; s/^-//; s/-$//' | cut -c1-48)"
+        [ -n "$_name" ] && [ "$_name" != "devin-" ] || _name="devin-box"
+    fi
+
+    # reuse a live session of the same name when present
+    if min session list --json 2>/dev/null | tr ',' '\n' | grep -q "\"name\" *: *\"$_name\""; then
+        say "reusing live session $_name"
+    else
+        set -- min session activate -n "$_name" --sync tarball --no-prompt -C "$_root"
+        [ -n "$_net" ] && set -- "$@" --network "$_net"
+        # shellcheck disable=SC2086
+        [ -n "$_loadouts" ] && set -- "$@" $_loadouts
+        _out=$("$@" 2>&1) || die "activate failed: $_out"
+        say "$_out" | tail -1
+    fi
+
+    # resolve the session's UUID (stable through renames) for the state file;
+    # the daemon pretty-prints, so compact then split on object boundaries
+    _id=$(min session list --json 2>/dev/null | tr -d '\n ' | tr '{' '\n' \
+        | grep "\"name\":\"$_name\"" \
+        | sed -n 's/.*"id":"\([0-9a-f-]*\)".*/\1/p' | head -1)
+    [ -n "$_id" ] || _id="$_name"
+
+    state_write "$_name" "$_id" "/workbench"
+    # the box answers exec a moment after activate returns — retry briefly
+    _i=0
+    until min session exec "$_id" 'echo minbox-ok' >/dev/null 2>&1; do
+        _i=$((_i+1)); [ "$_i" -ge 20 ] \
+            && die "box did not answer exec — check 'min ls' and the daemon logs"
+        sleep 1
+    done
+    say "armed: session=$_name id=$_id boxdir=/workbench"
+    say "every exec now runs inside the box; prefix 'host:' to stay out"
+}
+
+cmd_down() {
+    _destroy=0
+    [ "${1:-}" = "--destroy" ] && _destroy=1
+    _name="$(state_get session 2>/dev/null)"; _id="$(state_get session_id 2>/dev/null)"
+    rm -f "$(state_file)" "$(root)/.devin/.minbox-sync-marker"
+    if [ "$_destroy" = 1 ] && [ -n "${_id:-$_name}" ]; then
+        have_min && min session destroy --force "${_id:-$_name}" 2>&1 | tail -2
+    fi
+    say "disarmed${_name:+ (was $_name)}${_destroy:+; box destroyed}"
+}
+
+cmd_status() {
+    if ! have_min; then say '{"armed":false,"reason":"min not installed"}'; return; fi
+    if ! armed; then say '{"armed":false}'; return; fi
+    _id="$(state_get session_id)"; _live=false
+    session_live "$_id" && _live=true
+    printf '{"armed":true,"session":"%s","session_id":"%s","boxdir":"%s","live":%s}\n' \
+        "$(state_get session)" "$_id" "$(state_get boxdir)" "$_live"
+}
+
+cmd_exec() {
+    [ $# -ge 1 ] || die "exec needs a command"
+    armed || die "no armed box — run '$HINT_UP' first"
+    _id="$(state_get session_id)"
+    session_live "$_id" || die "armed box '$(state_get session)' is gone — run '$HINT_UP' to recreate, or '$HINT_DOWN' to disarm (armed mode never falls back to host execution)"
+    sync_push
+    _dir="$(state_get boxdir)"; _dir="${_dir:-/workbench}"
+    exec min session exec "$_id" "cd \"$_dir\" && $*"
+}
+
+cmd_pull() {
+    armed || die "no armed box"
+    _id="$(state_get session_id)"
+    session_live "$_id" || die "box is gone"
+    _root="$(root)"
+    if [ $# -eq 0 ]; then set -- .; fi
+    # GNU tar in the box: --exclude-vcs covers .git; members are ./<path>,
+    # which extract as <path> on both GNU and BSD tar.
+    min session exec "$_id" "tar cf - --exclude-vcs -C /workbench $*" \
+        | tar xf - -C "$_root"
+}
+
+cmd_task() {
+    armed || die "no armed box — run '$HINT_UP' first"
+    [ $# -ge 1 ] || die "task needs a name"
+    _id="$(state_get session_id)"; _task="$1"; shift
+    session_live "$_id" || die "armed box is gone — run '$HINT_UP'"
+    sync_push
+    exec min session run "$_id" "$_task" "$@"
+}
+
+cmd_policy() {
+    armed || die "no armed box"
+    exec min session policy "$(state_get session_id)" -o json
+}
+
+case "${1:-}" in
+    up)      shift; cmd_up "$@" ;;
+    down)    shift; cmd_down "$@" ;;
+    status)  cmd_status ;;
+    exec)    shift; cmd_exec "$@" ;;
+    sync)    armed || die "no armed box"; sync_push; say "synced" ;;
+    pull)    shift; cmd_pull "$@" ;;
+    task)    shift; cmd_task "$@" ;;
+    policy)  cmd_policy ;;
+    *)       die "usage: minbox up|down|status|exec|sync|pull|task|policy" ;;
+esac
