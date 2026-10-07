@@ -1,18 +1,26 @@
 # environment.yaml — Devin Cloud blueprint for fast-rs with the vendored
 # devin-minimal kit. Auto-arm mode: maintenance brings the project box up
-# before the agent session begins, so every exec routes into /workbench.
+# before the agent session begins, so it is ready for `minbox exec` use.
+#
+# NOTE: repo-level .devin/hooks.v1.json is NOT loaded by the cloud remote
+# agent (hooks are local-only). In cloud the kit is driven explicitly via
+# .devin/skills/minbox/ and these knowledge notes — tell the agent to run
+# commands through `sh .devin/minimal/minbox exec`.
 
 initialize:
   - run: |
-      # Minimal is preinstalled on the Devin cloud image (min 0.6.0) — this
-      # verifies it and installs via the official installer if ever absent.
+      # Minimal is preinstalled on some Devin cloud images (min 0.6.0);
+      # when absent this installs it via the official installer. Also adds
+      # git insteadOf identity exceptions so Minimal's upstream cache is
+      # not confused by git-manager proxy URL rewriting.
       export PATH="$HOME/.local/bin:$PATH"
       sh .devin/minimal/cloud-bootstrap.sh --channel stable
 
 maintenance:
   - run: |
-      # Verify the daemon answers, then arm the project box so agent execs
-      # route through .devin/hooks.v1.json into the box from the first command.
+      # Verify the daemon answers and neutralize any post-start insteadOf
+      # injection, then arm the project box so it is ready from the first
+      # agent command.
       export PATH="$HOME/.local/bin:$PATH"
       sh .devin/minimal/cloud-bootstrap.sh --check || true
       sh .devin/minimal/minbox up || true
@@ -20,13 +28,16 @@ maintenance:
 knowledge:
   - name: minimal-box
     contents: |
-      This repo carries a vendored devin-minimal kit at .devin/minimal/ and an
-      armed Minimal box. Every exec command runs inside the box at /workbench;
-      changed files are pushed automatically before each command.
-      `host: <cmd>` escapes to the VM host explicitly.
-      `sh .devin/minimal/minbox status` reports armed/live state.
-      Box config lives in minimal.toml ([session] packages, [tasks.*]).
-      The box's egress policy is authoritative — declare network needs there.
+      This repo carries a vendored devin-minimal kit at .devin/minimal/ and
+      an armed Minimal box (see the `minbox` skill for usage).
+      Run shell work inside the box:
+        sh .devin/minimal/minbox exec '<command>'
+      Commands run at /workbench inside the box; changed files are pushed
+      automatically before each boxed exec. `host: <cmd>` escapes to the
+      VM host explicitly. `sh .devin/minimal/minbox status` reports
+      armed/live state. Box config lives in minimal.toml ([session]
+      packages, [tasks.*]); the box's egress policy is authoritative —
+      declare network needs there.
   - name: minimal-tasks
     contents: |
       Run declared tasks with `sh .devin/minimal/minbox task <name>`.

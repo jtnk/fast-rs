@@ -92,10 +92,40 @@ need_min() {
     esac
 }
 
+# Managed hosts (Devin Cloud VMs, some CI images) rewrite github.com URLs to an
+# authenticated proxy via url.<proxy>.insteadOf — and those rules can appear
+# AFTER session start (Devin's git-manager injects them at agent init, i.e.
+# post-maintenance). `git remote get-url` applies the rewrite on read, so
+# minimald's upstream-cache identity check compares the proxy URL against
+# [upstream].repo and dies with `vcs: invalid remote path`. Neutralize per-org
+# with identity rules (base == match): longest match wins, so Minimal sees raw
+# URLs while every other repo keeps proxying. Idempotent, ~ms when quiet.
+neutralize_insteadof() {
+    command -v git >/dev/null 2>&1 || return 0
+    _urls="https://github.com/gominimal/"
+    _toml="$(root)/minimal.toml"
+    if [ -f "$_toml" ]; then
+        _u=$(sed -n 's/^[[:space:]]*repo[[:space:]]*=[[:space:]]*"\(.*\)".*/\1/p' \
+            "$_toml" | head -1)
+        case "$_u" in
+            https://*/*/*|http://*/*/*) _urls="$_urls ${_u%/*}" ;;
+        esac
+    fi
+    for _u in $_urls; do
+        _p="${_u%/}/"
+        # ls-remote --get-url expands insteadOf: unchanged means no rewrite
+        # (or our identity rule is already installed).
+        _eff=$(git ls-remote --get-url "$_p" 2>/dev/null || echo "$_p")
+        [ "$_eff" = "$_p" ] && continue
+        git config --global "url.$_p.insteadof" "$_p" 2>/dev/null || true
+    done
+}
+
 # Is this session id live on the daemon? Sessions JSON carries "id" fields;
 # match on the UUID itself (names can be reused, ids cannot).
 session_live() {
     have_min || return 1
+    neutralize_insteadof
     min session list --json 2>/dev/null | grep -q "$1"
 }
 
@@ -155,6 +185,7 @@ sync_push() {
 
 cmd_up() {
     need_min
+    neutralize_insteadof
     _root="$(root)"; _name=; _net=; _loadouts=
     while [ $# -gt 0 ]; do
         case "$1" in
